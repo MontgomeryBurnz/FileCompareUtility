@@ -11,6 +11,16 @@ SUPPORTED_EXTENSIONS = ("csv", "xls", "xlsx")
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 
 
+def column_index_to_excel_letter(index: int) -> str:
+    """Translate a zero-based column index to an Excel-style column label."""
+    label: List[str] = []
+    idx = index + 1
+    while idx > 0:
+        idx, remainder = divmod(idx - 1, 26)
+        label.append(chr(ord("A") + remainder))
+    return "".join(reversed(label))
+
+
 def read_csv_with_fallback(
     uploaded_file: BytesIO, encodings: Iterable[str] | None = None
 ) -> pd.DataFrame:
@@ -89,6 +99,13 @@ def compute_cell_mismatches(
     df_left: pd.DataFrame, df_right: pd.DataFrame, common_columns: List[str]
 ) -> Tuple[pd.DataFrame, float]:
     """Identify cell-level mismatches for shared columns."""
+    left_column_positions = {
+        column: df_left.columns.get_loc(column) for column in common_columns
+    }
+    right_column_positions = {
+        column: df_right.columns.get_loc(column) for column in common_columns
+    }
+
     df_left_common = df_left[common_columns].copy()
     df_right_common = df_right[common_columns].copy()
 
@@ -127,6 +144,8 @@ def compute_cell_mismatches(
                     "left_value": left_value,
                     "right_value": right_value,
                     "mismatch_type": mismatch_type,
+                    "left_cell": f"{column_index_to_excel_letter(left_column_positions[column])}{row_index + 2}",
+                    "right_cell": f"{column_index_to_excel_letter(right_column_positions[column])}{row_index + 2}",
                 }
             )
 
