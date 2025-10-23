@@ -1,20 +1,46 @@
 from __future__ import annotations
 
 from io import BytesIO
-from typing import Dict, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import pandas as pd
 import streamlit as st
 
 
 SUPPORTED_EXTENSIONS = ("csv", "xls", "xlsx")
+CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+
+
+def read_csv_with_fallback(
+    uploaded_file: BytesIO, encodings: Iterable[str] | None = None
+) -> pd.DataFrame:
+    """Read a CSV file, retrying with alternative encodings when decoding fails."""
+    encoding_candidates = (
+        tuple(encodings) if encodings is not None else CSV_ENCODING_CANDIDATES
+    )
+    last_error: Exception | None = None
+
+    for encoding in encoding_candidates:
+        try:
+            uploaded_file.seek(0)
+            return pd.read_csv(uploaded_file, encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    uploaded_file.seek(0)
+    if last_error:
+        tried = ", ".join(encoding_candidates)
+        raise ValueError(
+            f"Unable to decode CSV with tried encodings: {tried}"
+        ) from last_error
+    raise ValueError("Unable to decode CSV: no encodings supplied.")
 
 
 def load_tabular_file(uploaded_file: BytesIO) -> pd.DataFrame:
     """Load supported CSV or Excel files into a DataFrame."""
     name = uploaded_file.name.lower()
     if name.endswith(".csv"):
-        return pd.read_csv(uploaded_file)
+        return read_csv_with_fallback(uploaded_file)
     if name.endswith((".xls", ".xlsx")):
         return pd.read_excel(uploaded_file)
     raise ValueError("Unsupported file type. Please upload CSV or Excel files.")
