@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 
-SUPPORTED_EXTENSIONS = ("csv", "xls", "xlsx")
+SUPPORTED_EXTENSIONS = ("csv", "txt", "xls", "xlsx")
 CSV_ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
 
 
@@ -47,13 +47,15 @@ def read_csv_with_fallback(
 
 
 def load_tabular_file(uploaded_file: BytesIO) -> pd.DataFrame:
-    """Load supported CSV or Excel files into a DataFrame."""
+    """Load supported delimited text or Excel files into a DataFrame."""
     name = uploaded_file.name.lower()
-    if name.endswith(".csv"):
+    if name.endswith((".csv", ".txt")):
         return read_csv_with_fallback(uploaded_file)
     if name.endswith((".xls", ".xlsx")):
         return pd.read_excel(uploaded_file)
-    raise ValueError("Unsupported file type. Please upload CSV or Excel files.")
+    raise ValueError(
+        "Unsupported file type. Please upload CSV, TXT, or Excel files."
+    )
 
 
 def compare_column_names(
@@ -158,10 +160,51 @@ def compute_cell_mismatches(
     return mismatches_df, match_ratio
 
 
+def format_mismatch_report(
+    cell_mismatches: pd.DataFrame, left_file_name: str, right_file_name: str
+) -> pd.DataFrame:
+    """Create a user-friendly mismatch report with contextual details."""
+    if cell_mismatches.empty:
+        return cell_mismatches
+
+    friendly = cell_mismatches.copy()
+    type_labels = {
+        "missing_in_left": "Missing in first file",
+        "missing_in_right": "Missing in second file",
+        "value_mismatch": "Value mismatch",
+    }
+
+    friendly["Mismatch Type"] = friendly["mismatch_type"].map(
+        type_labels
+    ).fillna(friendly["mismatch_type"])
+    friendly["Column Name"] = friendly["column"]
+    friendly["Row Number"] = (friendly["row_index"] + 2).astype(int)
+    friendly["Left File"] = left_file_name
+    friendly["Left Value"] = friendly["left_value"]
+    friendly["Left Cell"] = friendly["left_cell"]
+    friendly["Right File"] = right_file_name
+    friendly["Right Value"] = friendly["right_value"]
+    friendly["Right Cell"] = friendly["right_cell"]
+
+    columns_order = [
+        "Mismatch Type",
+        "Column Name",
+        "Row Number",
+        "Left File",
+        "Left Cell",
+        "Left Value",
+        "Right File",
+        "Right Cell",
+        "Right Value",
+    ]
+
+    return friendly[columns_order]
+
+
 def build_summary_section(
     column_diff: Dict[str, List[str]],
     dtype_mismatches: List[Dict[str, str]],
-    cell_mismatches: pd.DataFrame,
+    cell_mismatch_report: pd.DataFrame,
 ) -> None:
     """Render summary details in the Streamlit UI."""
     st.subheader("Summary of Discrepancies")
@@ -188,9 +231,9 @@ def build_summary_section(
     else:
         st.write("- Data types: all matching for shared columns")
 
-    if not cell_mismatches.empty:
+    if not cell_mismatch_report.empty:
         st.write("**Data differences**")
-        st.dataframe(cell_mismatches, use_container_width=True)
+        st.dataframe(cell_mismatch_report, use_container_width=True)
     else:
         st.write("- Data values: no mismatches found")
 
@@ -213,7 +256,7 @@ def main() -> None:
     with st.sidebar:
         st.markdown("### Instructions")
         st.markdown(
-            "- Supported formats: CSV, XLS, XLSX\n"
+            "- Supported formats: CSV, TXT, XLS, XLSX\n"
             "- Comparisons use row order. Reorder rows first if they should align differently.\n"
             "- Download the mismatch report for a full breakdown of discrepancies."
         )
@@ -249,8 +292,11 @@ def main() -> None:
     dtype_mismatches, dtype_match_ratio = compare_dtypes(
         df_left, df_right, common_columns
     )
-    cell_mismatches, cell_match_ratio = compute_cell_mismatches(
+    cell_mismatches_raw, cell_match_ratio = compute_cell_mismatches(
         df_left, df_right, common_columns
+    )
+    cell_mismatch_report = format_mismatch_report(
+        cell_mismatches_raw, file_left.name, file_right.name
     )
 
     total_unique_columns = (
@@ -282,10 +328,10 @@ def main() -> None:
         help="Percentage of shared cells with matching values.",
     )
 
-    build_summary_section(column_diff, dtype_mismatches, cell_mismatches)
+    build_summary_section(column_diff, dtype_mismatches, cell_mismatch_report)
 
-    if not cell_mismatches.empty:
-        download_buffer = generate_download(cell_mismatches)
+    if not cell_mismatch_report.empty:
+        download_buffer = generate_download(cell_mismatch_report)
         st.download_button(
             label="Download mismatch report (CSV)",
             data=download_buffer,
